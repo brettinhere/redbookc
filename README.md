@@ -2,6 +2,17 @@
 
 > 小红书 AI 自动发帖Agent —— 用 Codong 语言构建
 
+## 界面预览
+
+<p align="center">
+  <img src="docs/images/screenshot-1.jpg" width="48%" />
+  <img src="docs/images/screenshot-2.jpg" width="48%" />
+</p>
+<p align="center">
+  <img src="docs/images/screenshot-3.jpg" width="48%" />
+  <img src="docs/images/screenshot-4.jpg" width="48%" />
+</p>
+
 **开源地址：** https://codong.org/redbookc/  
 **技术栈：** [Codong](https://codong.org) · Go · SQLite · Playwright · Claude AI
 
