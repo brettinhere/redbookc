@@ -1,0 +1,84 @@
+// publisher.cod - 发布引擎
+
+export fn log_pub(msg) {
+    print("[Publisher] {msg}")
+}
+
+export fn xiaohongshu_post(content, profile_dir, image_path, account_id) {
+    payload = {
+        profile_dir: profile_dir,
+        content: content,
+        account_id: to_string(account_id),
+    }
+    if image_path != null && image_path != "" {
+        payload.image_path = image_path
+    }
+    try {
+        resp = http.post("http://127.0.0.1:8085/post", payload, timeout: "120s")
+        data = resp.json()
+        if data == null {
+            return {ok: false, error: "poster-server returned invalid JSON"}
+        }
+        return data
+    } catch e {
+        return {ok: false, error: "poster-server error: {e.message}"}
+    }
+}
+
+export fn process_queue_item(row) {
+    queue_id   = row.id
+    user_id    = row.user_id
+    account_id = row.account_id
+    content    = row.content
+    image_path = row.image_path
+
+    ur = db.query("SELECT tokens FROM users WHERE id = ? LIMIT 1", [user_id])
+    if ur == null || ur.len() == 0 || ur[0].tokens < 2 {
+        db.query("UPDATE post_queue SET status = 'failed', error_msg = '积分不足' WHERE id = ?", [queue_id])
+        log_pub("跳过 queue={queue_id}：积分不足")
+    } else {
+        ar = db.query("SELECT profile_dir FROM accounts WHERE id = ? AND user_id = ? AND is_active = 1 LIMIT 1", [account_id, user_id])
+        if ar == null || ar.len() == 0 {
+            db.query("UPDATE post_queue SET status = 'failed', error_msg = '账号不存在或已禁用' WHERE id = ?", [queue_id])
+        } else {
+            profile_dir = ar[0].profile_dir
+            db.query("UPDATE post_queue SET status = 'running' WHERE id = ?", [queue_id])
+            log_pub("发帖 queue={queue_id} account={account_id}")
+            result = xiaohongshu_post(content, profile_dir, image_path, account_id)
+            if result.ok {
+                db.query("UPDATE users SET tokens = tokens - 2, tokens_used_today = tokens_used_today + 1 WHERE id = ?", [user_id])
+                db.query("UPDATE accounts SET post_count = post_count + 1, last_posted_at = datetime('now') WHERE id = ?", [account_id])
+                pub_url = result.url
+                if pub_url == null { pub_url = "published" }
+                db.query("UPDATE post_queue SET status = 'published', published_at = datetime('now'), published_url = ? WHERE id = ?", [pub_url, queue_id])
+                log_pub("成功 queue={queue_id}")
+            } else {
+                err_msg = result.error
+                if err_msg == null { err_msg = "unknown error" }
+                db.query("UPDATE post_queue SET status = 'failed', error_msg = ? WHERE id = ?", [err_msg, queue_id])
+                log_pub("失败 queue={queue_id} err={err_msg}")
+            }
+        }
+    }
+}
+
+export fn run_publish_cycle() {
+    // publish_at = 'now' 或者实际时间都要能匹配
+    rows = db.query(
+        "SELECT q.id, q.user_id, q.account_id, q.content, q.image_path FROM post_queue q JOIN accounts a ON a.id = q.account_id AND a.user_id = q.user_id AND a.is_active = 1 WHERE q.status = 'pending' AND (q.publish_at = 'now' OR q.publish_at <= datetime('now','localtime')) ORDER BY q.created_at ASC LIMIT 5"
+    )
+    if rows != null {
+        for row in rows {
+            process_queue_item(row)
+            time.sleep(3000)
+        }
+    }
+}
+
+export fn start_publish_engine() {
+    log_pub("发布引擎启动")
+    while true {
+        run_publish_cycle()
+        time.sleep(30000)
+    }
+}

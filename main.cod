@@ -1,0 +1,213 @@
+// RedBookC - 小红书自动发帖 SaaS 系统
+// 语言: Codong | 端口: 8084
+
+env.load("./.env")
+
+const PORT         = env.get("DASHBOARD_PORT", "8084")
+const DB_PATH      = env.get("DB_PATH", "./redbookc.db")
+const CLAUDE_KEY   = env.get("CLAUDE_API_KEY", "")
+const SKILLPAY_KEY = env.get("SKILLPAY_API_KEY", "")
+const SKILLPAY_SID = env.get("SKILLPAY_SKILL_ID", "")
+
+// ── 数据库初始化 ──────────────────────────────────────────────
+db.connect("sqlite://redbookc.db")
+
+db.query("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        tokens INTEGER DEFAULT 50,
+        tokens_used_today INTEGER DEFAULT 0,
+        post_language TEXT DEFAULT 'zh',
+        created_at TEXT DEFAULT (datetime('now'))
+    )
+""")
+
+db.query("""
+    CREATE TABLE IF NOT EXISTS accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        profile_dir TEXT NOT NULL,
+        daily_post_limit INTEGER DEFAULT 2,
+        interval_min INTEGER DEFAULT 360,
+        interval_max INTEGER DEFAULT 1440,
+        is_active INTEGER DEFAULT 1,
+        last_posted_at TEXT,
+        post_count INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+    )
+""")
+
+db.query("""
+    CREATE TABLE IF NOT EXISTS post_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        image_path TEXT DEFAULT '',
+        platform TEXT DEFAULT 'xiaohongshu',
+        status TEXT DEFAULT 'pending',
+        publish_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT,
+        published_url TEXT,
+        error_msg TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    )
+""")
+
+db.query("""
+    CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+    )
+""")
+
+db.query("""
+    CREATE TABLE IF NOT EXISTS recharge_pending (
+        user_id INTEGER PRIMARY KEY,
+        amount REAL NOT NULL,
+        balance_before REAL NOT NULL,
+        created_at TEXT DEFAULT (datetime('now'))
+    )
+""")
+
+print("[RedBookC] 数据库初始化完成")
+
+// ── 导入模块 ──────────────────────────────────────────────────
+import { json_ok, json_err, get_cookie, generate_token } from "./utils.cod"
+import { get_session_uid } from "./session.cod"
+import { auth_middleware, handle_register, handle_login, handle_logout, handle_me, handle_settings } from "./auth.cod"
+import { handle_account_list, handle_account_add, handle_account_update, handle_account_delete, handle_profile_list } from "./accounts.cod"
+import { handle_queue_add, handle_queue_list, handle_queue_delete, handle_queue_update, handle_queue_image } from "./queue.cod"
+import { handle_snapshot, handle_logs } from "./stats.cod"
+import { start_publish_engine, log_pub, xiaohongshu_post, run_publish_cycle, process_queue_item } from "./publisher.cod"
+import { handle_engine_start, handle_engine_stop, handle_engine_status, signal_engine_loop, run_signal_for_user, fetch_rss_news, parse_rss_titles, fallback_news, get_crypto_price, generate_signal, is_safe_content, log_eng } from "./engine.cod"
+import { handle_recharge, handle_recharge_confirm, handle_recharge_callback, get_skillpay_balance } from "./recharge.cod"
+import { start_daily_reset } from "./reset.cod"
+// DASHBOARD_HTML 从文件读取，避免 Codong CSS 字符串解析问题
+DASHBOARD_HTML = fs.read("/opt/redBookC/src/dashboard.html")
+
+
+// ── HTTP 服务器 ───────────────────────────────────────────────
+server = web.serve(port: PORT)
+
+// 静态页面
+server.get("/", fn(req) {
+    uid = get_session_uid(req)
+    if uid == null {
+        return web.redirect("/redbookc/login")
+    }
+    return web.html(fs.read("/opt/redBookC/src/dashboard.html"))
+})
+
+server.get("/login", fn(req) {
+    return web.html(login_html(""))
+})
+
+server.get("/register", fn(req) {
+    return web.html(register_html(""))
+})
+
+// SSE 事件流
+server.get("/api/events", fn(req) {
+    uid = get_session_uid(req)
+    if uid == null {
+        return {status: 401, body: "{\"error\":\"unauthorized\"}"}
+    }
+    return {status: 200, sse: true, handler: fn(writer) {
+        while true {
+            evt = <-event_ch
+            if evt.user_id == uid || evt.user_id == 0 {
+                writer.write("data: {json.stringify(evt)}\n\n")
+            }
+        }
+    }}
+})
+
+// 认证 API
+server.post("/api/login",    fn(req) { return handle_login(req) })
+server.post("/api/register", fn(req) { return handle_register(req) })
+server.post("/api/logout",   fn(req) { return handle_logout(req) })
+server.get("/api/me",        fn(req) { return auth_middleware(req, handle_me) })
+server.post("/api/me/settings", fn(req) { return auth_middleware(req, handle_settings) })
+
+// 账号管理
+server.get("/api/accounts",         fn(req) { return auth_middleware(req, handle_account_list) })
+server.post("/api/accounts",        fn(req) { return auth_middleware(req, handle_account_add) })
+server.put("/api/accounts/:id",     fn(req) { return auth_middleware(req, handle_account_update) })
+server.delete("/api/accounts/:id",  fn(req) { return auth_middleware(req, handle_account_delete) })
+server.get("/api/profiles",  fn(req) { return auth_middleware(req, handle_profile_list) })
+
+// 队列管理
+server.get("/api/queue",              fn(req) { return auth_middleware(req, handle_queue_list) })
+server.post("/api/queue",             fn(req) { return auth_middleware(req, handle_queue_add) })
+server.delete("/api/queue/:id",       fn(req) { return auth_middleware(req, handle_queue_delete) })
+server.put("/api/queue/:id",          fn(req) { return auth_middleware(req, handle_queue_update) })
+server.post("/api/queue/:id/image",   fn(req) { return auth_middleware(req, handle_queue_image) })
+
+// 统计
+server.get("/api/snapshot", fn(req) { return auth_middleware(req, handle_snapshot) })
+server.get("/api/logs",     fn(req) { return auth_middleware(req, handle_logs) })
+
+// 引擎控制
+server.post("/api/engine/start",   fn(req) { return auth_middleware(req, handle_engine_start) })
+server.post("/api/engine/stop",    fn(req) { return auth_middleware(req, handle_engine_stop) })
+server.get("/api/engine/status",   fn(req) { return auth_middleware(req, handle_engine_status) })
+
+// 充值
+server.post("/api/recharge",          fn(req) { return auth_middleware(req, handle_recharge) })
+server.post("/api/recharge/confirm",  fn(req) { return auth_middleware(req, handle_recharge_confirm) })
+server.post("/api/recharge/callback", fn(req) { return handle_recharge_callback(req) })
+
+// ── 启动后台 worker ───────────────────────────────────────────
+go fn() { start_publish_engine() }()
+go fn() { start_daily_reset() }()
+
+print("[RedBookC] v1.0 启动 -> https://codong.org/redbookc/  端口: {PORT}")
+
+server.listen()
+
+
+// ── 登录页 HTML ───────────────────────────────────────────────
+fn login_html(err_msg) {
+    err_block = ""
+    if err_msg != "" && err_msg != null {
+        err_block = "<div class=error-msg>" + err_msg + "</div>"
+    }
+    html = fs.read("/opt/redBookC/login.html")
+    return html.replace("<!--ERR_BLOCK-->", err_block)
+}
+
+fn register_html(err_msg) {
+    err_block = ""
+    if err_msg != "" && err_msg != null {
+        err_block = "<div class=error-msg>" + err_msg + "</div>"
+    }
+    html = fs.read("/opt/redBookC/register.html")
+    return html.replace("<!--ERR_BLOCK-->", err_block)
+}
+
+// 管理员直接加 token（仅 admin 账号可用）
+ADMIN_USERNAMES = ["brett"]
+server.post("/api/admin/add-tokens", fn(req) {
+    return auth_middleware(req, fn(r) {
+        // 校验是否管理员账号
+        admin_rows = db.query("SELECT username FROM users WHERE id = ? LIMIT 1", [r.uid])
+        if admin_rows == null || admin_rows.len() == 0 { return json_err("用户不存在", 403) }
+        uname = admin_rows[0].username
+        is_admin = false
+        for au in ADMIN_USERNAMES {
+            if uname == au { is_admin = true }
+        }
+        if !is_admin { return json_err("无管理员权限", 403) }
+        body = r.body
+        if body == null { return json_err("参数错误") }
+        amount = body.amount
+        if amount == null || to_number(amount) < 1 { return json_err("数量不合法") }
+        db.query("UPDATE users SET tokens = tokens + ? WHERE id = ?", [to_number(amount), r.uid])
+        return json_ok({ok: true})
+    })
+})

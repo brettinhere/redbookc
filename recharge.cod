@@ -1,0 +1,145 @@
+// recharge.cod - SkillPay 充值
+// 注意：辅助函数必须定义在调用它的函数之前（Codong 0.1.0 顺序限制）
+
+const SKILLPAY_KEY   = env.get("SKILLPAY_API_KEY", "")
+const SKILLPAY_SID   = env.get("SKILLPAY_SKILL_ID", "")
+const WEBHOOK_SECRET = env.get("SKILLPAY_WEBHOOK_SECRET", "")
+
+// ── 辅助函数 ─────────────────────────────────────────────────
+export fn get_skillpay_balance(skillpay_uid) {
+    try {
+        resp = http.get(
+            "https://skillpay.me/api/v1/billing/balance?skill_id={SKILLPAY_SID}&user_id={skillpay_uid}",
+            headers: {"X-API-Key": SKILLPAY_KEY}
+        )
+        if !resp.ok { return 0 }
+        data = resp.json()
+        if data == null || !data.has("data") { return 0 }
+        bal = data["data"]["balance"]
+        if bal == null { return 0 }
+        return to_number(bal)
+    } catch e {
+        return 0
+    }
+}
+
+// ── Step 1: 创建支付链接 ──────────────────────────────────────
+export fn handle_recharge(req) {
+    if SKILLPAY_KEY == "" || SKILLPAY_SID == "" {
+        return json_err("充值功能未配置", 503)
+    }
+    body = req.body
+    if body == null { return json_err("invalid body") }
+
+    amount = to_number(body.amount)
+    valid  = [5, 10, 20]
+    if !valid.contains(amount) { return json_err("金额只能是 $5、$10 或 $20") }
+
+    uid          = req.uid
+    skillpay_uid = "redbookc_{uid}"
+    balance_before = get_skillpay_balance(skillpay_uid)
+
+    try {
+        resp = http.post(
+            "https://skillpay.me/api/v1/billing/payment-link",
+            {
+                skill_id: SKILLPAY_SID,
+                user_id: skillpay_uid,
+                amount: amount,
+                notify_url: "https://codong.org/redbookc/api/recharge/callback",
+            },
+            headers: {"X-API-Key": SKILLPAY_KEY, "Content-Type": "application/json"}
+        )?
+        data = resp.json()
+        if data == null || !data.has("data") { return json_err("获取支付链接失败") }
+        pay_url = data["data"]["payment_url"]
+        if pay_url == null { return json_err("支付链接为空") }
+
+        // Bug1 Fix: 参数化查询，不拼接字符串
+        db.query(
+            "INSERT OR REPLACE INTO recharge_pending (user_id, amount, balance_before, created_at) VALUES (?, ?, ?, datetime('now'))",
+            [uid, amount, balance_before]
+        )
+        return json_ok({ok: true, pay_url: pay_url})
+    } catch e {
+        return json_err("创建支付链接失败: {e.message}")
+    }
+}
+
+// ── Step 2: 确认到账 ─────────────────────────────────────────
+export fn handle_recharge_confirm(req) {
+    if SKILLPAY_KEY == "" || SKILLPAY_SID == "" {
+        return json_err("充值功能未配置", 503)
+    }
+    uid          = req.uid
+    skillpay_uid = "redbookc_{uid}"
+
+    // Bug1 Fix: 参数化查询
+    rows = db.query("SELECT amount, balance_before FROM recharge_pending WHERE user_id = ? LIMIT 1", [uid])
+    if rows == null || rows.len() == 0 {
+        return json_err("没有待确认的充值记录")
+    }
+    pending        = rows[0]
+    amount         = pending.amount
+    balance_before = pending.balance_before
+    balance_now    = get_skillpay_balance(skillpay_uid)
+    diff = balance_now - balance_before
+    if diff <= 0 { return json_err("未检测到余额变化，请确认已完成支付") }
+
+    charge_amount = diff
+    if charge_amount > amount { charge_amount = amount }
+
+    try {
+        http.post(
+            "https://skillpay.me/api/v1/billing/charge",
+            {skill_id: SKILLPAY_SID, user_id: skillpay_uid, amount: charge_amount},
+            headers: {"X-API-Key": SKILLPAY_KEY, "Content-Type": "application/json"}
+        )?
+        tokens_add = to_number(charge_amount * 100)
+        // Bug1 Fix: 参数化查询
+        db.query("UPDATE users SET tokens = tokens + ? WHERE id = ?", [tokens_add, uid])
+        db.query("DELETE FROM recharge_pending WHERE user_id = ?", [uid])
+        print("[Recharge] 用户 {uid} 充值 ${charge_amount} +{tokens_add}T")
+        return json_ok({ok: true, tokens_added: tokens_add, charged: charge_amount})
+    } catch e {
+        return json_err("充值确认失败: {e.message}")
+    }
+}
+
+// ── Webhook 回调 ─────────────────────────────────────────────
+export fn handle_recharge_callback(req) {
+    if WEBHOOK_SECRET == "" {
+        return web.json({ok: false, error: "webhook secret not configured"}, 503)
+    }
+    body = req.body
+    if body == null { return web.json({ok: false, error: "invalid body"}, 400) }
+
+    // Bug2 Fix: HMAC-SHA256 签名验证
+    sig = req.headers["X-Webhook-Signature"]
+    if sig == null || sig == "" {
+        return web.json({ok: false, error: "missing signature"}, 403)
+    }
+    expected = crypto.hmac_sha256(WEBHOOK_SECRET, json.stringify(body))
+    if sig != expected {
+        print("[Recharge] Webhook 签名验证失败: got={sig} expected={expected}")
+        return web.json({ok: false, error: "invalid signature"}, 403)
+    }
+
+    metadata = body.metadata
+    if metadata == null { return web.json({ok: true, msg: "no metadata"}) }
+
+    autopilot_uid = metadata["autopilot_uid"]
+    if autopilot_uid == null { return web.json({ok: true, msg: "no autopilot_uid"}) }
+
+    uid = to_number(autopilot_uid)
+    if uid == null { return web.json({ok: true, msg: "invalid uid"}) }
+
+    amount = to_number(body.amount)
+    if amount == null || amount <= 0 { return web.json({ok: true, msg: "invalid amount"}) }
+
+    tokens_add = to_number(amount * 100)
+    // Bug1 Fix: 参数化查询
+    db.query("UPDATE users SET tokens = tokens + ? WHERE id = ?", [tokens_add, uid])
+    print("[Recharge] Webhook 用户 {uid} +{tokens_add}T")
+    return web.json({ok: true})
+}

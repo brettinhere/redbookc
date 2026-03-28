@@ -1,0 +1,90 @@
+// queue.cod - 发帖队列管理
+
+export fn handle_queue_add(req) {
+    body = req.body
+    if body == null { return json_err("invalid body") }
+    account_id = body.account_id
+    content    = body.content
+    image_path = body.image_path
+    if account_id == null { return json_err("account_id 不能为空") }
+    if content == null || content.trim() == "" { return json_err("内容不能为空") }
+    if content.len() > 5000 { return json_err("内容超过 5000 字") }
+    acc = db.find_one("accounts", {id: account_id, user_id: req.uid})
+    if acc == null { return json_err("账号不存在", 404) }
+    tok_rows = db.query("SELECT tokens FROM users WHERE id = ? LIMIT 1", [req.uid])
+    if tok_rows == null || tok_rows.len() == 0 || tok_rows[0].tokens < 2 {
+        return json_err("积分不足，每次发帖需 2 Token")
+    }
+    if image_path == null { image_path = "" }
+    result = db.query(
+        "INSERT INTO post_queue (user_id, account_id, content, image_path, platform, status, publish_at) VALUES (?, ?, ?, ?, 'xiaohongshu', 'pending', datetime('now'))",
+        [req.uid, account_id, content.trim(), image_path]
+    )
+    return json_ok({ok: true, id: result.id})
+}
+
+export fn handle_queue_list(req) {
+    rows = db.query(
+        "SELECT q.id, q.account_id, q.content, q.image_path, q.status, q.publish_at, q.published_at, q.published_url, q.error_msg, a.name as account_name FROM post_queue q LEFT JOIN accounts a ON a.id = q.account_id WHERE q.user_id = ? ORDER BY q.publish_at DESC LIMIT 100",
+        [req.uid]
+    )
+    items = rows.map(fn(r) {
+        preview = r.content
+        if preview != null && preview.len() > 80 { preview = preview.slice(0, 80) + "..." }
+        return {
+            id: r.id,
+            account_id: r.account_id,
+            account_name: r.account_name,
+            content_preview: preview,
+            image_path: r.image_path,
+            status: r.status,
+            publish_at: r.publish_at,
+            published_at: r.published_at,
+            published_url: r.published_url,
+            error_msg: r.error_msg,
+        }
+    })
+    return json_ok({ok: true, items: items})
+}
+
+export fn handle_queue_delete(req) {
+    id = req.path_params.id
+    if id == null { return json_err("缺少 id") }
+    row = db.query("SELECT id FROM post_queue WHERE id = ? AND user_id = ? AND status = 'pending' LIMIT 1", [id, req.uid])
+    if row == null || row.len() == 0 { return json_err("不存在或无权限删除", 404) }
+    db.query("DELETE FROM post_queue WHERE id = ? AND user_id = ?", [id, req.uid])
+    return json_ok({ok: true})
+}
+
+export fn handle_queue_update(req) {
+    id   = req.path_params.id
+    body = req.body
+    if id == null || body == null { return json_err("参数错误") }
+    row = db.query("SELECT id FROM post_queue WHERE id = ? AND user_id = ? AND status = 'pending' LIMIT 1", [id, req.uid])
+    if row == null || row.len() == 0 { return json_err("不存在或无权限修改", 404) }
+    if body.content != null {
+        content = body.content.trim()
+        if content == "" { return json_err("内容不能为空") }
+        db.query("UPDATE post_queue SET content = ? WHERE id = ? AND user_id = ?", [content, id, req.uid])
+    }
+    if body.publish_at != null {
+        db.query("UPDATE post_queue SET publish_at = ? WHERE id = ? AND user_id = ?", [body.publish_at, id, req.uid])
+    }
+    return json_ok({ok: true})
+}
+
+export fn handle_queue_image(req) {
+    id = req.path_params.id
+    if id == null { return json_err("缺少 id") }
+    row = db.query("SELECT id FROM post_queue WHERE id = ? AND user_id = ? LIMIT 1", [id, req.uid])
+    if row == null || row.len() == 0 { return json_err("不存在或无权限", 404) }
+    file = req.files.image
+    if file == null { return json_err("未收到图片") }
+    img_dir = "/opt/redBookC/uploads/"
+    fs.mkdir(img_dir)
+    filename = "q" + to_string(id) + "_" + to_string(time.now()) + ".jpg"
+    img_path = img_dir + filename
+    fs.write(img_path, file.data)
+    db.query("UPDATE post_queue SET image_path = ? WHERE id = ? AND user_id = ?", [img_path, id, req.uid])
+    return json_ok({ok: true, path: img_path})
+}

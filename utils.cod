@@ -1,0 +1,29 @@
+// utils.cod - 公共工具函数
+
+export fn json_ok(data) {
+    return web.json(data, 200)
+}
+
+export fn json_err(msg, status = 400) {
+    return web.json({ok: false, error: msg}, status)
+}
+
+export fn get_cookie(req, name) {
+    c = req.cookies[name]
+    if c != null { return c }
+    cookie_header = req.headers["Cookie"]
+    if cookie_header == null { return null }
+    parts = cookie_header.split(";")
+    for part in parts {
+        kv = part.trim().split("=")
+        if kv.len() >= 2 && kv[0].trim() == name {
+            return kv[1].trim()
+        }
+    }
+    return null
+}
+
+export fn generate_token() {
+    // 用 Go crypto/rand 生成 32 字节随机 token，比时间戳安全
+    return crypto.random_hex(32)
+}

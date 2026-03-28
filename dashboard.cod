@@ -1,0 +1,899 @@
+// dashboard.cod - Dashboard HTML 页面
+// 小红书风格，红白配色，学术机构 UI
+
+export const DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RedBookC - 小红书自动发帖</title>
+<style>
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  background: #f8f8f8;
+  color: #1a1a1a;
+  font-size: 14px;
+  line-height: 1.6;
+}
+a { color: #ff2442; text-decoration: none; }
+
+/* ── Layout ── */
+.app { display: flex; min-height: 100vh; }
+
+/* ── Sidebar ── */
+.sidebar {
+  width: 220px;
+  background: #fff;
+  border-right: 1px solid #ebebeb;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 100;
+}
+.sidebar-logo {
+  padding: 24px 20px 16px;
+  font-size: 20px;
+  font-weight: 800;
+  color: #1a1a1a;
+  border-bottom: 1px solid #ebebeb;
+}
+.sidebar-logo span { color: #ff2442; }
+.sidebar-logo small { display: block; font-size: 11px; font-weight: 400; color: #999; margin-top: 2px; }
+.sidebar-nav { flex: 1; padding: 12px 0; overflow-y: auto; }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  color: #555;
+  cursor: pointer;
+  transition: all .15s;
+  border-radius: 0;
+  font-size: 14px;
+}
+.nav-item:hover { background: #fff5f5; color: #ff2442; }
+.nav-item.active { background: #fff0f0; color: #ff2442; font-weight: 600; border-left: 3px solid #ff2442; }
+.nav-icon { font-size: 16px; width: 20px; text-align: center; }
+.sidebar-user {
+  padding: 16px 20px;
+  border-top: 1px solid #ebebeb;
+  font-size: 13px;
+}
+.sidebar-user .uname { font-weight: 600; color: #1a1a1a; }
+.sidebar-user .tokens {
+  color: #ff2442;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.sidebar-user .logout {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #999;
+  cursor: pointer;
+}
+.sidebar-user .logout:hover { color: #ff2442; }
+
+/* ── Main ── */
+.main {
+  margin-left: 220px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.topbar {
+  background: #fff;
+  border-bottom: 1px solid #ebebeb;
+  padding: 0 28px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.topbar-title { font-size: 16px; font-weight: 600; color: #1a1a1a; }
+.topbar-actions { display: flex; gap: 10px; align-items: center; }
+
+/* ── Page sections ── */
+.page { display: none; padding: 28px; }
+.page.active { display: block; }
+
+/* ── Cards ── */
+.card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #ebebeb;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+.card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Stats grid ── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.stat-card {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #ebebeb;
+  padding: 20px;
+  text-align: center;
+}
+.stat-card .stat-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #ff2442;
+  line-height: 1.2;
+}
+.stat-card .stat-label {
+  font-size: 12px;
+  color: #999;
+  margin-top: 4px;
+}
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all .15s;
+}
+.btn-primary { background: #ff2442; color: #fff; }
+.btn-primary:hover { background: #e01f3a; }
+.btn-secondary { background: #f5f5f5; color: #555; }
+.btn-secondary:hover { background: #ebebeb; }
+.btn-danger { background: #fff0f0; color: #d00; border: 1px solid #ffc0c0; }
+.btn-danger:hover { background: #ffe0e0; }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-green { background: #e6f9f0; color: #00a870; border: 1px solid #b3e6d4; }
+.btn-green:hover { background: #d0f5e4; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Forms ── */
+.form-row { margin-bottom: 14px; }
+.form-row label { display: block; font-size: 12px; color: #666; margin-bottom: 5px; font-weight: 500; }
+.form-row input,
+.form-row select,
+.form-row textarea {
+  width: 100%;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  outline: none;
+  transition: border .15s;
+  font-family: inherit;
+}
+.form-row input:focus,
+.form-row select:focus,
+.form-row textarea:focus { border-color: #ff2442; }
+.form-row textarea { resize: vertical; min-height: 100px; }
+.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* ── Token bar ── */
+.token-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #fff5f5 0%, #fff 100%);
+  border: 1px solid #ffd0d0;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+.token-bar .t-icon { font-size: 22px; }
+.token-bar .t-info { flex: 1; }
+.token-bar .t-balance { font-size: 18px; font-weight: 700; color: #ff2442; }
+.token-bar .t-label { font-size: 12px; color: #999; }
+.token-bar .t-today { font-size: 12px; color: #666; margin-top: 2px; }
+
+/* ── Engine panel ── */
+.engine-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: #fff;
+  border: 1px solid #ebebeb;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+.engine-panel .e-info .e-title { font-weight: 600; font-size: 14px; }
+.engine-panel .e-info .e-desc { font-size: 12px; color: #999; margin-top: 2px; }
+.engine-panel .e-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+.e-status.running { background: #e6f9f0; color: #00a870; }
+.e-status.stopped { background: #f5f5f5; color: #999; }
+.e-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* ── Table ── */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 600;
+  color: #666;
+  border-bottom: 1px solid #ebebeb;
+  white-space: nowrap;
+}
+tbody td {
+  padding: 12px;
+  border-bottom: 1px solid #f5f5f5;
+  color: #333;
+  vertical-align: middle;
+}
+tbody tr:hover td { background: #fafafa; }
+.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.badge-pending  { background: #fff8e0; color: #b08000; }
+.badge-running  { background: #e0f0ff; color: #0070cc; }
+.badge-published{ background: #e6f9f0; color: #00a870; }
+.badge-failed   { background: #fff0f0; color: #d00; }
+
+/* ── Modal ── */
+.modal-bg {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+.modal-bg.show { display: flex; }
+.modal {
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 8px 40px rgba(0,0,0,.15);
+}
+.modal-title { font-size: 16px; font-weight: 700; margin-bottom: 20px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+/* ── Recharge options ── */
+.recharge-opts { display: flex; gap: 10px; margin-bottom: 20px; }
+.recharge-opt {
+  flex: 1;
+  border: 2px solid #ebebeb;
+  border-radius: 10px;
+  padding: 14px 10px;
+  text-align: center;
+  cursor: pointer;
+  transition: all .15s;
+}
+.recharge-opt:hover, .recharge-opt.selected {
+  border-color: #ff2442;
+  background: #fff5f5;
+}
+.recharge-opt .ro-price { font-size: 18px; font-weight: 700; color: #ff2442; }
+.recharge-opt .ro-tokens { font-size: 12px; color: #999; margin-top: 4px; }
+
+/* ── Language toggle ── */
+.lang-toggle { display: flex; gap: 6px; }
+.lang-btn {
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid #e0e0e0;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.lang-btn.active { background: #ff2442; color: #fff; border-color: #ff2442; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #1a1a1a;
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 9999;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: all .25s;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.success { background: #00a870; }
+.toast.error { background: #d00; }
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    Red<span>Book</span>C
+    <small>小红书自动发帖</small>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-item active" onclick="showPage('home')" id="nav-home">
+      <span class="nav-icon">&#9632;</span> 控制台
+    </div>
+    <div class="nav-item" onclick="showPage('accounts')" id="nav-accounts">
+      <span class="nav-icon">&#9679;</span> 账号管理
+    </div>
+    <div class="nav-item" onclick="showPage('post')" id="nav-post">
+      <span class="nav-icon">&#9998;</span> 手动发帖
+    </div>
+    <div class="nav-item" onclick="showPage('queue')" id="nav-queue">
+      <span class="nav-icon">&#9776;</span> 发帖队列
+    </div>
+    <div class="nav-item" onclick="showPage('engine')" id="nav-engine">
+      <span class="nav-icon">&#9889;</span> 信号引擎
+    </div>
+  </nav>
+  <div class="sidebar-user">
+    <div class="uname" id="sb-username">-</div>
+    <div class="tokens">Token: <span id="sb-tokens">-</span></div>
+    <div class="logout" onclick="doLogout()">退出登录</div>
+  </div>
+</aside>
+
+<!-- ── Main ── -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-title" id="topbar-title">控制台</div>
+    <div class="topbar-actions">
+      <div class="lang-toggle" id="lang-toggle">
+        <button class="lang-btn active" onclick="setLang('zh')" id="lang-zh">中文</button>
+        <button class="lang-btn" onclick="setLang('en')" id="lang-en">English</button>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openRecharge()">充值 Token</button>
+    </div>
+  </div>
+
+  <!-- 控制台 -->
+  <div class="page active" id="page-home">
+    <div class="token-bar">
+      <div class="t-icon">&#9733;</div>
+      <div class="t-info">
+        <div class="t-balance"><span id="token-balance">-</span> Token</div>
+        <div class="t-label">可用积分 · 每次发帖消耗 2 Token</div>
+        <div class="t-today">今日已用: <span id="token-today">-</span> Token</div>
+      </div>
+      <button class="btn btn-primary" onclick="openRecharge()">立即充值</button>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="s-total">-</div>
+        <div class="stat-label">累计发帖</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="s-today">-</div>
+        <div class="stat-label">今日发帖</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="s-pending">-</div>
+        <div class="stat-label">待发送</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="s-accounts">-</div>
+        <div class="stat-label">活跃账号</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">&#9776; 最近发帖</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>内容</th><th>账号</th><th>状态</th><th>时间</th>
+          </tr></thead>
+          <tbody id="recent-tbody">
+            <tr><td colspan="4" style="text-align:center;color:#999;padding:20px">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 账号管理 -->
+  <div class="page" id="page-accounts">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span>&#9679; 小红书账号</span>
+        <button class="btn btn-primary btn-sm" onclick="openAddAccount()">+ 添加账号</button>
+      </div>
+      <p style="font-size:12px;color:#999;margin-bottom:16px">
+        每个账号需先在服务器运行 <code>node login.js --profile &lt;目录&gt;</code> 完成一次手动登录，后续自动发帖无需再次登录。
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>账号名</th><th>Profile 目录</th><th>每日上限</th><th>间隔(分)</th><th>发帖数</th><th>状态</th><th>操作</th>
+          </tr></thead>
+          <tbody id="accounts-tbody">
+            <tr><td colspan="7" style="text-align:center;color:#999;padding:20px">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 手动发帖 -->
+  <div class="page" id="page-post">
+    <div class="card" style="max-width:640px">
+      <div class="card-title">&#9998; 手动发帖</div>
+      <div class="form-row">
+        <label>选择账号</label>
+        <select id="post-account"></select>
+      </div>
+      <div class="form-row">
+        <label>帖子内容 <span style="color:#999;font-size:11px">(第一行将作为标题)</span></label>
+        <textarea id="post-content" placeholder="写你的帖子内容...&#10;&#10;支持多行，第一行自动当标题&#10;&#10;#话题标签" rows="8"></textarea>
+      </div>
+      <div class="form-row">
+        <label>图片路径 <span style="color:#999;font-size:11px">(可选，服务器上的绝对路径)</span></label>
+        <input id="post-image" placeholder="/opt/redBookC/images/photo.jpg">
+      </div>
+      <div class="form-row">
+        <label>定时发布 <span style="color:#999;font-size:11px">(留空=立即)</span></label>
+        <input id="post-time" type="datetime-local">
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn btn-primary" onclick="submitPost()">加入队列</button>
+        <span style="font-size:12px;color:#999">消耗 2 Token</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 发帖队列 -->
+  <div class="page" id="page-queue">
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between">
+        <span>&#9776; 发帖队列</span>
+        <div style="display:flex;gap:8px">
+          <select id="queue-filter" onchange="loadQueue()" style="border:1px solid #e0e0e0;border-radius:6px;padding:4px 8px;font-size:12px">
+            <option value="all">全部</option>
+            <option value="pending">待发送</option>
+            <option value="published">已发布</option>
+            <option value="failed">失败</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="loadQueue()">刷新</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>内容预览</th><th>账号</th><th>状态</th><th>计划时间</th><th>结果</th>
+          </tr></thead>
+          <tbody id="queue-tbody">
+            <tr><td colspan="5" style="text-align:center;color:#999;padding:20px">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 信号引擎 -->
+  <div class="page" id="page-engine">
+    <div class="card">
+      <div class="card-title">&#9889; 自动信号引擎</div>
+      <p style="font-size:13px;color:#666;margin-bottom:20px;line-height:1.7">
+        每 <strong>10 分钟</strong>自动抓取 CoinTelegraph / Decrypt / Bitcoin Magazine 最新新闻，
+        通过 Claude AI 生成加密市场观点帖子，自动入队发布到小红书。
+      </p>
+
+      <div class="engine-panel">
+        <div class="e-info">
+          <div class="e-title">信号生成引擎</div>
+          <div class="e-desc">RSS 新闻 + Claude AI → 自动生成市场观点帖子</div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span class="e-status stopped" id="engine-signal-status">
+            <span class="e-dot"></span> 未启动
+          </span>
+          <button class="btn btn-green btn-sm" id="btn-signal-start" onclick="engineAction('signal','start')">启动</button>
+          <button class="btn btn-danger btn-sm" id="btn-signal-stop" onclick="engineAction('signal','stop')" style="display:none">停止</button>
+        </div>
+      </div>
+
+      <div class="card" style="background:#f9f9f9;border:1px solid #f0f0f0">
+        <div style="font-size:12px;color:#666;line-height:1.8">
+          <strong>运行说明：</strong><br>
+          - 启动后每 10 分钟自动生成一篇帖子加入队列<br>
+          - 发布引擎每 30 秒自动扫描队列，按计划时间发帖<br>
+          - 每篇帖子消耗 2 Token，积分不足时自动暂停<br>
+          - 语言跟随控制台顶部语言设置（中文/English）
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div> <!-- /main -->
+</div> <!-- /app -->
+
+<!-- 充值 Modal -->
+<div class="modal-bg" id="modal-recharge">
+  <div class="modal">
+    <div class="modal-title">充值 Token</div>
+    <div id="recharge-step1">
+      <div class="recharge-opts" id="recharge-opts">
+        <div class="recharge-opt selected" onclick="selectAmount(5, this)">
+          <div class="ro-price">$5</div>
+          <div class="ro-tokens">500 Token</div>
+        </div>
+        <div class="recharge-opt" onclick="selectAmount(10, this)">
+          <div class="ro-price">$10</div>
+          <div class="ro-tokens">1000 Token</div>
+        </div>
+        <div class="recharge-opt" onclick="selectAmount(20, this)">
+          <div class="ro-price">$20</div>
+          <div class="ro-tokens">2000 Token</div>
+        </div>
+      </div>
+      <p style="font-size:12px;color:#999;margin-bottom:16px">$1 USDT = 100 Token · 支持 BNB Chain USDT</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeRecharge()">取消</button>
+        <button class="btn btn-primary" onclick="goToPay()">前往支付</button>
+      </div>
+    </div>
+    <div id="recharge-step2" style="display:none">
+      <div style="text-align:center;padding:20px 0">
+        <div style="font-size:40px;margin-bottom:12px">&#128279;</div>
+        <div style="font-weight:600;margin-bottom:8px">支付页面已在新窗口打开</div>
+        <div style="font-size:13px;color:#666;margin-bottom:20px">完成 USDT 支付后，点击下方按钮确认到账</div>
+        <button class="btn btn-primary" style="width:100%" onclick="confirmRecharge()">已完成支付，确认到账</button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeRecharge()">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 添加账号 Modal -->
+<div class="modal-bg" id="modal-add-account">
+  <div class="modal">
+    <div class="modal-title">添加小红书账号</div>
+    <div class="form-row">
+      <label>账号名称</label>
+      <input id="acc-name" placeholder="给账号起个名字，如：主号">
+    </div>
+    <div class="form-row">
+      <label>Profile 目录路径</label>
+      <input id="acc-profile" placeholder="/opt/redBookC/profiles/account1">
+      <div style="font-size:11px;color:#999;margin-top:4px">服务器上运行 login.js 后生成的目录路径</div>
+    </div>
+    <div class="form-grid-2">
+      <div class="form-row">
+        <label>每日发帖上限</label>
+        <input id="acc-daily" type="number" value="2" min="1" max="10">
+      </div>
+      <div class="form-row">
+        <label>发帖间隔（分钟）</label>
+        <input id="acc-interval" type="number" value="720" min="60">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeAddAccount()">取消</button>
+      <button class="btn btn-primary" onclick="submitAddAccount()">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────
+let curPage = 'home'
+let curUser = {}
+let rechargeAmount = 5
+let es = null
+
+// ── Init ───────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadMe()
+  loadSnapshot()
+  loadRecentLogs()
+  loadAccountsForSelect()
+  connectSSE()
+  setInterval(loadSnapshot, 30000)
+})
+
+async function api(method, path, body) {
+  const opts = {method, headers: {'Content-Type': 'application/json'}}
+  if (body) opts.body = JSON.stringify(body)
+  const r = await fetch(path, opts)
+  return r.json()
+}
+
+// ── SSE ────────────────────────────────────────────────────────
+function connectSSE() {
+  es = new EventSource('/api/events')
+  es.onmessage = e => {
+    const d = JSON.parse(e.data)
+    if (d.type === 'published') {
+      loadSnapshot()
+      loadRecentLogs()
+      if (curPage === 'queue') loadQueue()
+      toast('发帖成功', 'success')
+    } else if (d.type === 'queued') {
+      loadSnapshot()
+      // 有新内容入队时，立即刷新队列页
+      if (curPage === 'queue') loadQueue()
+    }
+  }
+  es.onerror = () => setTimeout(connectSSE, 5000)
+}
+
+// ── Navigation ─────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'))
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))  document.getElementById('page-' + name).classList.add('active')
+  document.getElementById('nav-' + name).classList.add('active')
+  const titles = {home:'控制台', accounts:'账号管理', post:'手动发帖', queue:'发帖队列', engine:'信号引擎'}
+  document.getElementById('topbar-title').textContent = titles[name] || name
+  curPage = name
+  if (name === 'accounts') loadAccounts()
+  if (name === 'queue') loadQueue()
+  if (name === 'post') loadAccountsForSelect()
+  if (name === 'engine') loadEngineStatus()
+}
+
+// ── Me ─────────────────────────────────────────────────────────
+async function loadMe() {
+  const d = await api('GET', '/api/me')
+  if (!d.ok) { location.href = '/login'; return }
+  curUser = d
+  document.getElementById('sb-username').textContent = d.username
+  document.getElementById('sb-tokens').textContent = d.tokens
+  document.getElementById('token-balance').textContent = d.tokens
+  document.getElementById('token-today').textContent = d.tokens_used_today
+  if (d.post_language === 'en') {
+    document.getElementById('lang-en').classList.add('active')
+    document.getElementById('lang-zh').classList.remove('active')
+  }
+}
+
+// ── Snapshot ───────────────────────────────────────────────────
+async function loadSnapshot() {
+  const d = await api('GET', '/api/snapshot')
+  if (!d.ok) return
+  document.getElementById('s-total').textContent    = d.total_posted
+  document.getElementById('s-today').textContent    = d.today_posted
+  document.getElementById('s-pending').textContent  = d.pending
+  document.getElementById('s-accounts').textContent = d.active_accounts
+  document.getElementById('sb-tokens').textContent  = d.tokens
+  document.getElementById('token-balance').textContent = d.tokens
+  document.getElementById('token-today').textContent   = d.tokens_used_today
+}
+
+// ── Logs ───────────────────────────────────────────────────────
+async function loadRecentLogs() {
+  const d = await api('GET', '/api/logs?limit=10')
+  if (!d.ok) return
+  const tb = document.getElementById('recent-tbody')
+  if (!d.items.length) { tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">暂无记录</td></tr>'; return }
+  tb.innerHTML = d.items.map(r => `
+    <tr>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.preview}</td>
+      <td>${r.account_id}</td>
+      <td><span class="badge badge-${r.status}">${r.status}</span></td>
+      <td style="color:#999;font-size:12px">${r.published_at || r.publish_at || '-'}</td>
+    </tr>`).join('')
+}
+
+// ── Queue ──────────────────────────────────────────────────────
+async function loadQueue() {
+  const f = document.getElementById('queue-filter').value
+  const d = await api('GET', '/api/queue?status=' + f + '&limit=50')
+  if (!d.ok) return
+  const tb = document.getElementById('queue-tbody')
+  if (!d.items.length) { tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">暂无记录</td></tr>'; return }
+  tb.innerHTML = d.items.map(r => `
+    <tr>
+      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.content_preview}">${r.content_preview}</td>
+      <td>${r.account_name || r.account_id}</td>
+      <td><span class="badge badge-${r.status}">${r.status}</span></td>
+      <td style="font-size:12px;color:#999">${r.publish_at || '-'}</td>
+      <td style="font-size:12px">${r.published_url ? '<a href="'+r.published_url+'" target="_blank">查看</a>' : (r.error_msg || '-')}</td>
+    </tr>`).join('')
+}
+
+// ── Accounts ───────────────────────────────────────────────────
+async function loadAccounts() {
+  const d = await api('GET', '/api/accounts')
+  if (!d.ok) return
+  const tb = document.getElementById('accounts-tbody')
+  if (!d.accounts.length) {
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px">还没有账号，点击右上角添加</td></tr>'
+    return
+  }
+  tb.innerHTML = d.accounts.map(a => `
+    <tr>
+      <td>${a.name}</td>
+      <td style="font-size:12px;color:#666;max-width:200px;overflow:hidden;text-overflow:ellipsis">${a.profile_dir}</td>
+      <td>${a.daily_post_limit}</td>
+      <td>${a.interval_minutes}</td>
+      <td>${a.post_count}</td>
+      <td><span class="badge ${a.is_active ? 'badge-published' : 'badge-failed'}">${a.is_active ? '活跃' : '停用'}</span></td>
+      <td>
+        <button class="btn btn-secondary btn-sm" onclick="toggleAccount(${a.id}, ${a.is_active ? 0 : 1})">${a.is_active ? '停用' : '启用'}</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteAccount(${a.id})">删除</button>
+      </td>
+    </tr>`).join('')
+}
+
+async function toggleAccount(id, val) {
+  await api('PUT', '/api/accounts/' + id, {is_active: val})
+  loadAccounts()
+}
+
+async function deleteAccount(id) {
+  if (!confirm('确认删除该账号？')) return
+  await api('DELETE', '/api/accounts/' + id)
+  loadAccounts()
+  toast('已删除')
+}
+
+function openAddAccount() { document.getElementById('modal-add-account').classList.add('show') }
+function closeAddAccount() { document.getElementById('modal-add-account').classList.remove('show') }
+async function submitAddAccount() {
+  const name     = document.getElementById('acc-name').value.trim()
+  const profile  = document.getElementById('acc-profile').value.trim()
+  const daily    = parseInt(document.getElementById('acc-daily').value)
+  const interval = parseInt(document.getElementById('acc-interval').value)
+  if (!name || !profile) { toast('请填写账号名和 Profile 目录', 'error'); return }
+  const d = await api('POST', '/api/accounts', {name, profile_dir: profile, daily_post_limit: daily, interval_minutes: interval})
+  if (d.ok) { closeAddAccount(); loadAccounts(); toast('添加成功', 'success') }
+  else toast(d.error || '添加失败', 'error')
+}
+
+async function loadAccountsForSelect() {
+  const d = await api('GET', '/api/accounts')
+  if (!d.ok) return
+  const sel = document.getElementById('post-account')
+  sel.innerHTML = d.accounts.filter(a => a.is_active).map(a => `<option value="${a.id}">${a.name}</option>`).join('')
+}
+
+// ── Manual Post ────────────────────────────────────────────────
+async function submitPost() {
+  const account_id = document.getElementById('post-account').value
+  const content    = document.getElementById('post-content').value.trim()
+  const image_path = document.getElementById('post-image').value.trim()
+  const publish_at = document.getElementById('post-time').value
+  if (!account_id) { toast('请选择账号', 'error'); return }
+  if (!content)    { toast('内容不能为空', 'error'); return }
+  const body = {account_id: parseInt(account_id), content}
+  if (image_path) body.image_path = image_path
+  if (publish_at) body.publish_at = publish_at.replace('T', ' ')
+  const d = await api('POST', '/api/queue', body)
+  if (d.ok) {
+    document.getElementById('post-content').value = ''
+    toast('已加入队列', 'success')
+    loadSnapshot()
+  } else toast(d.error || '发帖失败', 'error')
+}
+
+// ── Engine ─────────────────────────────────────────────────────
+async function loadEngineStatus() {
+  const d = await api('GET', '/api/engine/status')
+  if (!d.ok) return
+  updateEngineUI('signal', d.signal)
+}
+
+function updateEngineUI(type, running) {
+  const st  = document.getElementById('engine-signal-status')
+  const bs  = document.getElementById('btn-signal-start')
+  const bst = document.getElementById('btn-signal-stop')
+  if (running) {
+    st.className = 'e-status running'
+    st.innerHTML = '<span class="e-dot"></span> 运行中'
+    bs.style.display = 'none'
+    bst.style.display = ''
+  } else {
+    st.className = 'e-status stopped'
+    st.innerHTML = '<span class="e-dot"></span> 未启动'
+    bs.style.display = ''
+    bst.style.display = 'none'
+  }
+}
+
+async function engineAction(type, action) {
+  const d = await api('POST', '/api/engine/' + action, {type})
+  if (d.ok) {
+    loadEngineStatus()
+    toast(action === 'start' ? '引擎已启动' : '引擎已停止', action === 'start' ? 'success' : '')
+  } else toast(d.error || '操作失败', 'error')
+}
+
+// ── Language ───────────────────────────────────────────────────
+async function setLang(lang) {
+  document.getElementById('lang-zh').classList.toggle('active', lang === 'zh')
+  document.getElementById('lang-en').classList.toggle('active', lang === 'en')
+  await api('POST', '/api/me/settings', {post_language: lang})
+  toast(lang === 'zh' ? '已切换为中文' : 'Switched to English')
+}
+
+// ── Recharge ───────────────────────────────────────────────────
+function openRecharge() {
+  document.getElementById('recharge-step1').style.display = ''
+  document.getElementById('recharge-step2').style.display = 'none'
+  document.getElementById('modal-recharge').classList.add('show')
+}
+function closeRecharge() {
+  document.getElementById('modal-recharge').classList.remove('show')
+  rechargeAmount = 5
+  document.querySelectorAll('.recharge-opt').forEach((el, i) => el.classList.toggle('selected', i === 0))
+}
+function selectAmount(amt, el) {
+  rechargeAmount = amt
+  document.querySelectorAll('.recharge-opt').forEach(e => e.classList.remove('selected'))
+  el.classList.add('selected')
+}
+async function goToPay() {
+  const d = await api('POST', '/api/recharge', {amount: rechargeAmount})
+  if (d.ok) {
+    window.open(d.pay_url, '_blank')
+    document.getElementById('recharge-step1').style.display = 'none'
+    document.getElementById('recharge-step2').style.display = ''
+  } else toast(d.error || '获取支付链接失败', 'error')
+}
+async function confirmRecharge() {
+  const d = await api('POST', '/api/recharge/confirm', {})
+  if (d.ok) {
+    closeRecharge()
+    await loadMe()
+    toast('充值成功，已到账 ' + d.tokens_added + ' Token', 'success')
+  } else toast(d.error || '确认失败', 'error')
+}
+
+// ── Logout ─────────────────────────────────────────────────────
+async function doLogout() {
+  await api('POST', '/api/logout')
+  location.href = '/login'
+}
+
+// ── Toast ──────────────────────────────────────────────────────
+function toast(msg, type) {
+  const el = document.getElementById('toast')
+  el.textContent = msg
+  el.className = 'toast show' + (type ? ' ' + type : '')
+  setTimeout(() => el.classList.remove('show'), 2500)
+}
+</script>
+</body></html>"""

@@ -1,0 +1,19 @@
+// reset.cod - 每日重置
+import { db } from "./main.cod"
+
+export fn start_daily_reset() {
+    go fn() {
+        while true {
+            time.sleep(60000)       // 先 sleep，再取时间
+            now = time.now()
+            h = to_number(time.format(now, "15"))
+            m = to_number(time.format(now, "04"))
+            if h == 0 && m == 0 {
+                db.query("UPDATE users SET tokens_used_today = 0")
+                print("[Reset] 已重置所有用户今日使用量")
+                time.sleep(61000)   // 防止同一分钟重复执行（多 1 秒）
+            }
+        }
+    }()
+    print("[Reset] 每日重置定时器已启动")
+}

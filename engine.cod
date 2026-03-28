@@ -1,0 +1,221 @@
+// engine.cod - 信号生成引擎
+// 注意：export fn 里禁用 if cond { return } 早退（Codong 0.1.0 bug）
+
+const CLAUDE_KEY = env.get("CLAUDE_API_KEY", "")
+
+engine_signal_users = {}
+
+export fn log_eng(msg) {
+    print("[Engine] {msg}")
+}
+
+export fn is_safe_content(content) {
+    danger = ["投诉", "骗局", "维权", "踩雷", "差评", "避坑", "黑幕",
+              "诈骗", "虚假", "举报", "坑人", "后悔", "翻车",
+              "赔偿", "退款", "律师", "起诉", "比特币", "以太坊", "炒币", "加密货币"]
+    safe = true
+    for word in danger {
+        if content.contains(word) { safe = false }
+    }
+    return safe
+}
+
+export fn fallback_news() {
+    return [
+        "AI编程工具让普通人也能做出完整产品，Vibe Coding正在改变开发方式",
+        "OpenClaw让AI Agent 24小时自动帮你干活，解放双手的时代来了",
+        "用AI写代码一天能做多少事？试了一下真的震惊了",
+        "Cursor、Claude、OpenClaw——2026年人人必备的AI工具",
+        "不会编程也能做SaaS？Vibe Coding让这件事成为现实",
+    ]
+}
+
+export fn parse_rss_titles(xml) {
+    titles = []
+    parts = xml.split("<title>")
+    for i in range(1, parts.len()) {
+        end = parts[i].index_of("</title>")
+        if end > 0 {
+            title = parts[i].slice(0, end).trim()
+            title = title.replace("<![CDATA[", "").replace("]]>", "").trim()
+            if title.len() > 5 && title.len() < 200 {
+                titles.push(title)
+            }
+        }
+    }
+    return titles
+}
+
+export fn get_crypto_price(coin_id) {
+    return ""
+}
+
+export fn fetch_rss_news() {
+    sources = [
+        "https://feeds.feedburner.com/aisupremacy",
+        "https://www.artificialintelligence-news.com/feed/",
+        "https://techcrunch.com/feed/",
+    ]
+    idx    = to_number(time.now()) % sources.len()
+    url    = sources[idx]
+    result = fallback_news()
+    try {
+        resp = http.get(url, headers: {"User-Agent": "Mozilla/5.0 RedBookC/1.0"})
+        if resp.ok {
+            titles = parse_rss_titles(resp.body)
+            if titles.len() > 0 {
+                news = []
+                i = to_number(time.now()) % titles.len()
+                news.push(titles[i])
+                j = (i + 3) % titles.len()
+                news.push(titles[j])
+                result = news
+            }
+        }
+    } catch e {
+        result = fallback_news()
+    }
+    return result
+}
+
+export fn generate_signal(trend_summary, lang) {
+    text = null
+    if CLAUDE_KEY != "" {
+        prompt = ""
+        if lang == "en" {
+            prompt = "You are a tech blogger on Xiaohongshu. Based on these headlines:\n{trend_summary}\n\nWrite a Chinese post about AI/Vibe Coding/OpenClaw. STRICT rules:\n1. Main text: max 20 Chinese characters (excluding hashtags)\n2. Casual conversational tone\n3. End with 2-3 hashtags (not counted in limit)\n4. No title, just the text\n5. No crypto content\n\nOutput only the post text and hashtags, nothing else."
+        } else {
+            prompt = "你是小红书科技博主，专注AI工具、Vibe Coding、OpenClaw。参考以下资讯：\n{trend_summary}\n\n写一条小红书短文案，严格要求：\n1. 正文汉字总数不超过20个字（不含标签）\n2. 语气口语化，像朋友说话\n3. 末尾加2-3个#话题标签（不计入字数）\n4. 不要标题，直接正文\n5. 绝对不提加密货币\n\n只输出正文和标签，不要任何解释。"
+        }
+        try {
+            resp = http.post(
+                "https://api.anthropic.com/v1/messages",
+                {model: "claude-haiku-4-5", max_tokens: 1024, messages: [{role: "user", content: prompt}]},
+                headers: {"x-api-key": CLAUDE_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+            )
+            if resp.ok {
+                data = resp.json()
+                if data != null {
+                    content_arr = data["content"]
+                    if content_arr != null && content_arr.len() > 0 {
+                        t = content_arr[0]["text"]
+                        if t != null {
+
+                            text = t
+                        }
+                    }
+                }
+            } else {
+                log_eng("Claude 错误: {resp.status}")
+            }
+        } catch e {
+            log_eng("Claude 失败: {e.message}")
+        }
+    }
+    return text
+}
+
+// 计算下一篇帖子的 publish_at（基于账号频率设置，随机间隔）
+export fn calc_next_publish_at(acc_id, uid) {
+    ar = db.query(
+        "SELECT daily_post_limit, interval_min, interval_max FROM accounts WHERE id = ? AND user_id = ? LIMIT 1",
+        [acc_id, uid]
+    )
+    min_interval = 60
+    max_interval = 480
+    if ar != null && ar.len() > 0 {
+        cfg_min   = ar[0].interval_min
+        cfg_max   = ar[0].interval_max
+        cfg_daily = ar[0].daily_post_limit
+        if cfg_min != null && cfg_min > 0 { min_interval = cfg_min }
+        if cfg_max != null && cfg_max > 0 { max_interval = cfg_max }
+        if min_interval > max_interval { min_interval = max_interval }
+    }
+    // 随机取 min_interval ~ max_interval 之间的分钟数
+    rand_range = max_interval - min_interval
+    if rand_range <= 0 { rand_range = 1 }
+    rand_minutes = min_interval + (to_number(time.now()) % rand_range)
+    delay_str = "{rand_minutes}m"
+    return time.format(time.add(time.now(), delay_str), "datetime")
+}
+
+export fn run_signal_for_user(uid, is_first) {
+    uid = to_number(uid)
+    ur = db.query("SELECT tokens, post_language FROM users WHERE id = ? LIMIT 1", uid)
+    if ur == null || ur.len() == 0 || ur[0].tokens < 2 {
+        log_eng("用户 {uid} 积分不足")
+    } else {
+        ar = db.query("SELECT id FROM accounts WHERE user_id = ? AND is_active = 1 LIMIT 1", uid)
+        if ar == null || ar.len() == 0 {
+            log_eng("用户 {uid} 没有活跃账号")
+        } else {
+            lang   = ur[0].post_language
+            if lang == null { lang = "zh" }
+            acc_id = ar[0].id
+
+            trends    = fetch_rss_news()
+            btc_price = get_crypto_price("bitcoin")
+            eth_price = get_crypto_price("ethereum")
+            trend_summary = "最新新闻：\n{trends.join(\"\n\")}\nBTC: {btc_price}\nETH: {eth_price}"
+
+            log_eng("用户 {uid} 生成内容 lang={lang}")
+            content = null
+            retries = 0
+            while (content == null || content == "" || !is_safe_content(content)) && retries < 3 {
+                if retries > 0 { log_eng("用户 {uid} 重试生成 retry={retries}") }
+                content = generate_signal(trend_summary, lang)
+                retries = retries + 1
+            }
+            if content != null && content != "" && is_safe_content(content) {
+                publish_at = calc_next_publish_at(acc_id, uid)
+                if is_first { publish_at = time.format(time.add(time.now(), "1m"), "datetime") }
+                db.query(
+                    "INSERT INTO post_queue (user_id, account_id, content, platform, status, publish_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    uid, acc_id, content, "xiaohongshu", "pending", publish_at
+                )
+                log_eng("用户 {uid} 入队 publish_at={publish_at}")
+            } else {
+                log_eng("用户 {uid} 内容生成失败，放弃")
+            }
+        }
+    }
+}
+
+export fn signal_engine_loop(uid) {
+    log_eng("用户 {uid} 引擎启动")
+    // 立即生成第一条，1分钟后发布
+    run_signal_for_user(uid, true)
+    running = engine_signal_users.get(to_string(uid), false)
+    while running {
+        time.sleep(600000)
+        running = engine_signal_users.get(to_string(uid), false)
+        if running {
+            run_signal_for_user(uid, false)
+        }
+    }
+    log_eng("用户 {uid} 引擎退出")
+}
+
+export fn handle_engine_start(req) {
+    uid = req.uid
+    already = engine_signal_users.get(to_string(uid), false)
+    engine_signal_users[to_string(uid)] = true
+    log_eng("用户 {uid} 开启")
+    if !already {
+        go fn() { signal_engine_loop(uid) }()
+    }
+    return web.json({ok: true})
+}
+
+export fn handle_engine_stop(req) {
+    uid = req.uid
+    engine_signal_users[to_string(uid)] = false
+    log_eng("用户 {uid} 停止")
+    return web.json({ok: true})
+}
+
+export fn handle_engine_status(req) {
+    uid       = req.uid
+    signal_on = engine_signal_users.get(to_string(uid), false)
+    return web.json({ok: true, signal: signal_on})
+}

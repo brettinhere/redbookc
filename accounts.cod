@@ -1,0 +1,96 @@
+// accounts.cod - 小红书账号管理
+
+export fn handle_profile_list(req) {
+    base = "/opt/redBookC/profiles"
+    profiles = []
+    try {
+        entries = fs.list(base)
+        for entry in entries {
+            dir_path = base + "/" + entry.name
+            cookie_file = dir_path + "/Default/Cookies"
+            if fs.exists(cookie_file) {
+                profiles.push({name: entry.name, path: dir_path})
+            }
+        }
+    } catch e {
+        profiles = []
+    }
+    return json_ok({ok: true, profiles: profiles})
+}
+
+export fn handle_account_list(req) {
+    rows = db.query(
+        "SELECT id, name, profile_dir, daily_post_limit, interval_min, interval_max, is_active, last_posted_at, post_count FROM accounts WHERE user_id = ? ORDER BY id",
+        [req.uid]
+    )
+    accounts = rows.map(fn(r) {
+        return {
+            id: r.id,
+            name: r.name,
+            profile_dir: r.profile_dir,
+            daily_post_limit: r.daily_post_limit,
+            interval_min: r.interval_min,
+            interval_max: r.interval_max,
+            is_active: r.is_active,
+            last_posted_at: r.last_posted_at,
+            post_count: r.post_count,
+        }
+    })
+    return json_ok({ok: true, accounts: accounts})
+}
+
+export fn handle_account_add(req) {
+    body = req.body
+    if body == null { return json_err("invalid body") }
+    name        = body.name
+    profile_dir = body.profile_dir
+    daily_limit = body.daily_post_limit
+    interval_min = body.interval_min
+    interval_max = body.interval_max
+
+    if name == null || name.trim() == "" { return json_err("账号名不能为空") }
+    if profile_dir == null || profile_dir.trim() == "" { return json_err("请选择 Profile") }
+    if daily_limit == null { daily_limit = 2 }
+    if interval_min == null { interval_min = 360 }
+    if interval_max == null { interval_max = 1440 }
+    if interval_min > interval_max { return json_err("最小间隔不能大于最大间隔") }
+
+    if !fs.exists(profile_dir) {
+        return json_err("Profile 目录不存在，请先完成小红书登录")
+    }
+
+    result = db.query(
+        "INSERT INTO accounts (user_id, name, profile_dir, daily_post_limit, interval_min, interval_max, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)",
+        [req.uid, name.trim(), profile_dir.trim(), daily_limit, interval_min, interval_max]
+    )
+    return json_ok({ok: true, id: result.id})
+}
+
+export fn handle_account_update(req) {
+    account_id = req.param.id
+    body = req.body
+    if body == null { return json_err("invalid body") }
+    existing = db.find_one("accounts", {id: account_id, user_id: req.uid})
+    if existing == null { return json_err("账号不存在", 404) }
+    if body.is_active != null {
+        db.query("UPDATE accounts SET is_active = ? WHERE id = ? AND user_id = ?", [body.is_active, account_id, req.uid])
+    }
+    if body.daily_post_limit != null {
+        db.query("UPDATE accounts SET daily_post_limit = ? WHERE id = ? AND user_id = ?", [body.daily_post_limit, account_id, req.uid])
+    }
+    if body.interval_min != null {
+        db.query("UPDATE accounts SET interval_min = ? WHERE id = ? AND user_id = ?", [body.interval_min, account_id, req.uid])
+    }
+    if body.interval_max != null {
+        db.query("UPDATE accounts SET interval_max = ? WHERE id = ? AND user_id = ?", [body.interval_max, account_id, req.uid])
+    }
+    return json_ok({ok: true})
+}
+
+export fn handle_account_delete(req) {
+    account_id = req.param.id
+    existing = db.find_one("accounts", {id: account_id, user_id: req.uid})
+    if existing == null { return json_err("账号不存在", 404) }
+    db.query("DELETE FROM accounts WHERE id = ? AND user_id = ?", [account_id, req.uid])
+    return json_ok({ok: true})
+}

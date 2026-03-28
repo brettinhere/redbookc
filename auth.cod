@@ -1,0 +1,120 @@
+// auth.cod - 用户认证、session 管理
+
+import { get_session_uid } from "./session.cod"
+
+const BCRYPT_HASH_URL   = "http://127.0.0.1:8085/bcrypt/hash"
+const BCRYPT_VERIFY_URL = "http://127.0.0.1:8085/bcrypt/verify"
+
+export fn auth_middleware(req, handler) {
+    uid = get_session_uid(req)
+    if uid == null {
+        return web.json({ok: false, error: "unauthorized"}, 401)
+    }
+    req.uid = uid
+    return handler(req)
+}
+
+export fn handle_register(req) {
+    body = req.body
+    if body == null {
+        return json_err("invalid request body")
+    }
+    username = body.username
+    password = body.password
+    if username == null || username.len() < 3 || username.len() > 20 {
+        return json_err("用户名需 3-20 位")
+    }
+    if password == null || password.len() < 6 {
+        return json_err("密码至少 6 位")
+    }
+    existing = db.find_one("users", {username: username})
+    if existing != null {
+        return json_err("用户名已被占用")
+    }
+    hash_resp = http.post(BCRYPT_HASH_URL, {password: password})
+    if hash_resp == null {
+        return json_err("密码加密失败：poster-server 无响应")
+    }
+    hr = hash_resp.json()
+    if hr == null || !hr.ok {
+        return json_err("密码加密失败")
+    }
+    hash = hr.hash
+    result = db.query("INSERT INTO users (username, password_hash, tokens) VALUES (?, ?, 50)", [username, hash])
+    user_id = result.id
+    token = generate_token()
+    expires_at = time.now() + 2592000
+    db.query("INSERT OR REPLACE INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)", [token, user_id, expires_at])
+    cookie_hdr = {}
+    cookie_hdr["Set-Cookie"] = "session=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+    return web.json({ok: true, username: username, tokens: 50}, 200, cookie_hdr)
+}
+
+export fn handle_login(req) {
+    body = req.body
+    if body == null {
+        return json_err("invalid request body")
+    }
+    username = body.username
+    password = body.password
+    if username == null || password == null {
+        return json_err("用户名和密码不能为空")
+    }
+    user = db.find_one("users", {username: username})
+    if user == null {
+        return json_err("用户名或密码错误")
+    }
+    verify_resp = http.post(BCRYPT_VERIFY_URL, {password: password, hash: user.password_hash})
+    if verify_resp == null {
+        return json_err("验证失败")
+    }
+    vr = verify_resp.json()
+    if vr == null || !vr.ok {
+        return json_err("用户名或密码错误")
+    }
+    token = generate_token()
+    expires_at = time.now() + 2592000
+    db.query("INSERT OR REPLACE INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)", [token, user.id, expires_at])
+    cookie_hdr = {}
+    cookie_hdr["Set-Cookie"] = "session=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+    return web.json({ok: true, username: user.username}, 200, cookie_hdr)
+}
+
+export fn handle_logout(req) {
+    tok = req.cookies["session"]
+    if tok != null {
+        db.query("DELETE FROM sessions WHERE token = ?", [tok])
+    }
+    logout_hdr = {}
+    logout_hdr["Set-Cookie"] = "session=; Path=/; Max-Age=0"
+    return web.json({ok: true}, 200, logout_hdr)
+}
+
+export fn handle_me(req) {
+    rows = db.query("SELECT id, username, tokens, tokens_used_today, post_language FROM users WHERE id = ? LIMIT 1", [req.uid])
+    if rows == null || rows.len() == 0 {
+        return json_err("user not found", 404)
+    }
+    user = rows[0]
+    return json_ok({
+        ok: true,
+        id: user.id,
+        username: user.username,
+        tokens: user.tokens,
+        tokens_used_today: user.tokens_used_today,
+        post_language: user.post_language,
+    })
+}
+
+export fn handle_settings(req) {
+    body = req.body
+    if body == null {
+        return json_err("invalid body")
+    }
+    lang = body.post_language
+    if lang != "zh" && lang != "en" {
+        return json_err("post_language must be zh or en")
+    }
+    db.query("UPDATE users SET post_language = ? WHERE id = ?", [lang, req.uid])
+    return json_ok({ok: true})
+}

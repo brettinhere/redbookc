@@ -1,0 +1,55 @@
+// stats.cod - 快照统计和日志
+
+export fn handle_snapshot(req) {
+    uid = req.uid
+    r1 = db.query("SELECT COUNT(*) as cnt FROM post_queue WHERE user_id = ? AND status = 'published'", [uid])
+    r2 = db.query("SELECT COUNT(*) as cnt FROM post_queue WHERE user_id = ? AND status = 'published' AND date(published_at) = date('now')", [uid])
+    r3 = db.query("SELECT COUNT(*) as cnt FROM post_queue WHERE user_id = ? AND status = 'pending'", [uid])
+    r4 = db.query("SELECT COUNT(*) as cnt FROM accounts WHERE user_id = ? AND is_active = 1", [uid])
+    r5 = db.query("SELECT tokens, tokens_used_today FROM users WHERE id = ? LIMIT 1", [uid])
+    total = 0
+    today = 0
+    pending = 0
+    active = 0
+    tokens = 0
+    today_used = 0
+    if r1 != null && r1.len() > 0 { total = r1[0].cnt }
+    if r2 != null && r2.len() > 0 { today = r2[0].cnt }
+    if r3 != null && r3.len() > 0 { pending = r3[0].cnt }
+    if r4 != null && r4.len() > 0 { active = r4[0].cnt }
+    if r5 != null && r5.len() > 0 {
+        tokens = r5[0].tokens
+        today_used = r5[0].tokens_used_today
+    }
+    return json_ok({
+        ok: true,
+        total_posted: total,
+        today_posted: today,
+        pending: pending,
+        active_accounts: active,
+        tokens: tokens,
+        tokens_used_today: today_used,
+    })
+}
+
+export fn handle_logs(req) {
+    rows = db.query(
+        "SELECT id, account_id, content, status, publish_at, published_at, published_url, error_msg FROM post_queue WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
+        [req.uid]
+    )
+    items = rows.map(fn(r) {
+        preview = r.content
+        if preview != null && preview.len() > 60 { preview = preview.slice(0, 60) + "..." }
+        return {
+            id: r.id,
+            account_id: r.account_id,
+            preview: preview,
+            status: r.status,
+            publish_at: r.publish_at,
+            published_at: r.published_at,
+            published_url: r.published_url,
+            error_msg: r.error_msg,
+        }
+    })
+    return json_ok({ok: true, items: items})
+}

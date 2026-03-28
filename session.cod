@@ -1,0 +1,16 @@
+// session.cod - session 读取
+
+export fn get_session_uid(req) {
+    token = req.cookies["session"]
+    if token == null || token == "" {
+        auth = req.headers["Authorization"]
+        if auth != null && auth.starts_with("Bearer ") {
+            token = auth.slice(7, auth.len())
+        }
+    }
+    if token == null || token == "" { return null }
+    now = time.now()
+    rows = db.query("SELECT user_id FROM sessions WHERE token = ? AND expires_at > ? LIMIT 1", [token, now])
+    if rows == null || rows.len() == 0 { return null }
+    return rows[0].user_id
+}

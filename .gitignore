@@ -1,0 +1,29 @@
+# 环境变量（含密钥，不提交）
+.env
+
+# 数据库
+*.db
+*.db-shm
+*.db-wal
+
+# 用户上传图片
+uploads/
+
+# Chrome Profile（含 Cookie，不提交）
+profiles/
+
+# Go 编译产物
+redbookc_src
+
+# Node.js
+node_modules/
+
+# 临时调试脚本
+fix_*.py
+probe*.js
+screenshot.js
+save_cookie.js
+login.js
+
+# 系统文件
+.DS_Store
